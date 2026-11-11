@@ -1,0 +1,991 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Truss Designer</title>
+<meta name="description" content="Place joints and members on a grid, then copy joint coordinates and the connection matrix as Python, MATLAB, JSON or CSV.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap">
+<style>
+:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0}
+[hidden]{display:none!important}
+/* Layout: sticky pan-and-zoom drawing canvas on the left, live outputs (joint editor, check, coordinates, matrix, export) on the right; stacks on phones. */
+:root{
+  --bg:#F1F4F7; --panel:#FFFFFF; --fg:#14212B; --muted:#5A6874; --line:#D2DAE1;
+  --grid:#E3E9EE; --grid-major:#C9D3DB; --member:#1E3A52; --node-fill:#FFFFFF;
+  --accent:#C2410C; --on-accent:#FFFFFF; --accent-soft:#FBE6DA; --danger:#B3261E;
+  --ok-bg:#E1F3E8; --ok-fg:#14633C; --info-bg:#E3EDF7; --info-fg:#1D4F7A;
+  --bad-bg:#FCE7E4; --bad-fg:#9B1C13; --warn-bg:#FFF4D6; --warn-fg:#6B4A00; --warn-line:#EBD28A;
+  --f-display:'Space Grotesk',Inter,system-ui,sans-serif;
+  --f-body:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+  --f-mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0D141B; --panel:#131D26; --fg:#E6EDF3; --muted:#91A0AC; --line:#2A3743;
+    --grid:#1A2530; --grid-major:#26343F; --member:#9CC4E0; --node-fill:#0D141B;
+    --accent:#FF8C4A; --on-accent:#1A0E05; --accent-soft:#3B2415; --danger:#FF7A6E;
+    --ok-bg:#12301F; --ok-fg:#6FD3A0; --info-bg:#14283A; --info-fg:#8EC1EE;
+    --bad-bg:#341613; --bad-fg:#FF9A90; --warn-bg:#2B2410; --warn-fg:#F0CB6B; --warn-line:#4D4020;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0D141B; --panel:#131D26; --fg:#E6EDF3; --muted:#91A0AC; --line:#2A3743;
+  --grid:#1A2530; --grid-major:#26343F; --member:#9CC4E0; --node-fill:#0D141B;
+  --accent:#FF8C4A; --on-accent:#1A0E05; --accent-soft:#3B2415; --danger:#FF7A6E;
+  --ok-bg:#12301F; --ok-fg:#6FD3A0; --info-bg:#14283A; --info-fg:#8EC1EE;
+  --bad-bg:#341613; --bad-fg:#FF9A90; --warn-bg:#2B2410; --warn-fg:#F0CB6B; --warn-line:#4D4020;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+body{
+  background:var(--bg); color:var(--fg);
+  font-family:var(--f-body); font-size:14px; line-height:1.5;
+  padding-block:20px 36px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+}
+.app{max-width:1360px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+h1{font-family:var(--f-display);font-weight:600;font-size:26px;line-height:1.15;margin:0 0 4px;letter-spacing:-.01em;text-wrap:balance}
+.sub{margin:0;color:var(--muted);max-width:68ch}
+
+.layout{display:grid;grid-template-columns:minmax(0,1fr);gap:22px}
+@media (min-width:980px){
+  .layout{grid-template-columns:minmax(0,1.65fr) minmax(340px,1fr);align-items:start}
+  .stage{position:sticky;top:16px}
+}
+.stage{display:flex;flex-direction:column;gap:10px;min-width:0}
+.out{display:flex;flex-direction:column;gap:20px;min-width:0}
+
+/* toolbar */
+.toolbar{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center}
+.grp{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+button,select,input[type=text]{font:inherit;color:var(--fg)}
+.btn{
+  display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 12px;
+  background:var(--panel);border:1px solid var(--line);border-radius:6px;cursor:pointer;
+  font-weight:500;transition:background-color .12s,border-color .12s,color .12s;
+}
+.btn:hover:not(:disabled){border-color:var(--muted)}
+.btn:disabled{opacity:.45;cursor:default}
+.btn[aria-pressed="true"],.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.btn.sq{width:34px;padding:0;justify-content:center;font-size:18px;line-height:1}
+.btn:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.k{font-family:var(--f-mono);font-size:10.5px;opacity:.7;border:1px solid currentColor;border-radius:3px;padding:0 4px;line-height:15px}
+@media (hover:none){.k{display:none}}
+.field{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12.5px}
+.field select,.field input[type=text]{
+  height:34px;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:0 8px;color:var(--fg);
+}
+.field input[type=text]{width:64px}
+.chk{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12.5px;cursor:pointer}
+.chk input{accent-color:var(--accent);width:15px;height:15px;margin:0}
+
+/* canvas */
+.cwrap{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}
+#cv{display:block;width:100%;height:auto;aspect-ratio:880/480;touch-action:none;user-select:none;-webkit-user-select:none;background:var(--panel);cursor:grab}
+#cv[data-tool="joint"],#cv[data-tool="member"]{cursor:crosshair}
+#cv[data-tool="delete"]{cursor:pointer}
+.gn{stroke:var(--grid);stroke-width:1}
+.gm{stroke:var(--grid-major);stroke-width:1}
+.ax{stroke:var(--muted);stroke-width:1.5}
+.tick{fill:var(--muted);font:11px var(--f-mono);paint-order:stroke;stroke:var(--panel);stroke-width:3px;stroke-linejoin:round}
+.axt{fill:var(--muted);font:500 11.5px var(--f-mono);paint-order:stroke;stroke:var(--panel);stroke-width:3px;stroke-linejoin:round}
+.mem{stroke:var(--member);stroke-width:4;stroke-linecap:round}
+.mem.hot{stroke:var(--danger);stroke-dasharray:7 6}
+.prev{stroke:var(--accent);stroke-width:3;stroke-dasharray:7 6;stroke-linecap:round}
+.nd{fill:var(--node-fill);stroke:var(--member);stroke-width:2.5}
+.nd.start{fill:var(--accent);stroke:var(--accent)}
+.nd.sel{stroke:var(--accent);stroke-width:3.5}
+.nd.tgt{stroke:var(--accent);stroke-width:4}
+.nd.hot{stroke:var(--danger);stroke-width:4}
+.selring{fill:none;stroke:var(--accent);stroke-width:2;opacity:.55}
+.nl{fill:var(--fg);font:600 12px var(--f-mono);paint-order:stroke;stroke:var(--panel);stroke-width:4px;stroke-linejoin:round}
+.ml{fill:var(--muted);font:500 10.5px var(--f-mono);paint-order:stroke;stroke:var(--panel);stroke-width:3px;stroke-linejoin:round}
+.ring{fill:none;stroke:var(--accent);stroke-width:1.5}
+.crs{stroke:var(--accent);stroke-width:1.5}
+
+.status{display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 16px;color:var(--muted);font-size:12.5px}
+.status .hint{min-width:0;flex:1 1 320px}
+.readout{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+
+/* outputs */
+.sec{display:flex;flex-direction:column;gap:8px;min-width:0}
+.sec h2,summary{
+  margin:0;font-family:var(--f-body);font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);
+}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);background:var(--panel);border:1px solid var(--line);border-radius:8px}
+.stat{padding:10px 14px;min-width:0}
+.stat+.stat{border-left:1px solid var(--line)}
+.stat .l{display:block;font-size:11.5px;color:var(--muted)}
+.stat .v{font-family:var(--f-display);font-weight:600;font-size:24px;line-height:1.2;font-variant-numeric:tabular-nums}
+.pill{display:inline-block;align-self:flex-start;padding:3px 10px;border-radius:999px;font-size:12.5px;font-weight:500}
+.pill.ok{background:var(--ok-bg);color:var(--ok-fg)}
+.pill.info{background:var(--info-bg);color:var(--info-fg)}
+.pill.bad{background:var(--bad-bg);color:var(--bad-fg)}
+.pill.idle{background:var(--bg);color:var(--muted);border:1px solid var(--line)}
+.note{margin:0;font-size:12.5px;color:var(--muted)}
+.warn{background:var(--warn-bg);color:var(--warn-fg);border:1px solid var(--warn-line);border-radius:8px;padding:8px 12px;font-size:12.5px}
+.warn ul{margin:0;padding-left:18px}
+
+.tw{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:auto;max-height:280px}
+table{border-collapse:separate;border-spacing:0;width:100%;font-family:var(--f-mono);font-size:12.5px;font-variant-numeric:tabular-nums}
+th,td{padding:5px 10px;text-align:right;white-space:nowrap}
+thead th{position:sticky;top:0;background:var(--panel);color:var(--muted);font-weight:500;border-bottom:1px solid var(--line);z-index:1}
+tbody th{font-weight:500;color:var(--muted)}
+tbody tr+tr>*{border-top:1px solid var(--grid)}
+tbody tr[data-i]{cursor:pointer}
+tbody tr[data-i]:hover>*{background:var(--bg)}
+tbody tr.sel>*,tbody tr.sel:hover>*{background:var(--accent-soft)}
+th.l,td.l{text-align:left}
+.jb{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;padding:0 4px;border:1.5px solid var(--member);border-radius:999px;color:var(--fg);font-size:11px;font-weight:600}
+table.mx th,table.mx td{text-align:center;padding:4px 7px;min-width:30px}
+table.mx tbody th{position:sticky;left:0;background:var(--panel);z-index:1;border-right:1px solid var(--line)}
+table.mx thead th.corner{left:0;z-index:2;border-right:1px solid var(--line)}
+table.mx td.zero{color:var(--muted);opacity:.6}
+table.mx td.diag{background:var(--bg)}
+table.mx td.one{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.empty{margin:0;padding:12px;color:var(--muted);font-family:var(--f-body);font-size:13px;text-align:left;white-space:normal}
+
+details{display:flex;flex-direction:column;gap:8px}
+details>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px}
+details>summary::-webkit-details-marker{display:none}
+details>summary::before{content:"";width:0;height:0;border-left:5px solid currentColor;border-top:4px solid transparent;border-bottom:4px solid transparent;transition:transform .12s}
+details[open]>summary::before{transform:rotate(90deg)}
+
+.exrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.exrow .field{flex:1 1 auto}
+textarea{
+  width:100%;height:250px;resize:vertical;white-space:pre;overflow:auto;
+  background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:10px 12px;
+  font-family:var(--f-mono);font-size:12px;line-height:1.55;
+}
+.ci{width:76px;height:34px;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:0 8px;text-align:right;font:inherit;color:var(--fg)}
+.addrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.addrow .lab{color:var(--muted);font-size:12.5px}
+.msg{margin:0;font-size:12.5px;color:var(--danger)}
+@media (prefers-reduced-motion:reduce){.btn,details>summary::before{transition:none}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Truss Designer</h1>
+    <p class="sub">Place joints on the grid, connect them with members, and read off the coordinates and connection matrix as you draw.</p>
+  </header>
+
+  <div class="layout">
+    <section class="stage" aria-label="Drawing">
+      <div class="toolbar" role="toolbar" aria-label="Drawing tools">
+        <div class="grp">
+          <button class="btn" type="button" data-tool="joint" aria-pressed="true">Joint <span class="k">J</span></button>
+          <button class="btn" type="button" data-tool="member" aria-pressed="false">Member <span class="k">M</span></button>
+          <button class="btn" type="button" data-tool="delete" aria-pressed="false">Delete <span class="k">D</span></button>
+        </div>
+        <div class="grp">
+          <button class="btn" type="button" id="undo">Undo</button>
+          <button class="btn" type="button" id="redo">Redo</button>
+          <button class="btn" type="button" id="example">Example</button>
+          <button class="btn" type="button" id="clear">Clear</button>
+        </div>
+        <div class="grp" role="group" aria-label="View">
+          <button class="btn sq" type="button" id="zout" aria-label="Zoom out" title="Zoom out">&minus;</button>
+          <button class="btn sq" type="button" id="zin" aria-label="Zoom in" title="Zoom in">+</button>
+          <button class="btn" type="button" id="fit" title="Fit all joints in view">Fit</button>
+        </div>
+        <div class="grp">
+          <label class="field" for="snap">Snap
+            <select id="snap">
+              <option value="0.25">0.25</option>
+              <option value="0.5">0.5</option>
+              <option value="1" selected>1</option>
+              <option value="2">2</option>
+              <option value="5">5</option>
+              <option value="10">10</option>
+            </select>
+          </label>
+          <label class="field" for="units">Units
+            <input type="text" id="units" value="m" maxlength="6" autocomplete="off" spellcheck="false">
+          </label>
+          <label class="chk" for="nums"><input type="checkbox" id="nums"> Member numbers</label>
+        </div>
+      </div>
+
+      <div class="cwrap">
+        <svg id="cv" data-tool="joint" viewBox="0 0 880 480" role="img" aria-label="Truss drawing area">
+          <g id="gStatic"></g>
+          <g id="gDyn"></g>
+        </svg>
+      </div>
+
+      <div class="status">
+        <span class="hint" id="hint"></span>
+        <span class="readout" id="readout">x –, y –</span>
+      </div>
+    </section>
+
+    <aside class="out" aria-label="Results">
+      <section class="sec" id="editSec">
+        <h2 id="edTitle">Add joint</h2>
+        <div class="addrow">
+          <label class="lab" for="ax">x</label><input class="ci" type="number" id="ax" step="any" placeholder="0">
+          <label class="lab" for="ay">y</label><input class="ci" type="number" id="ay" step="any" placeholder="0">
+          <button class="btn primary" type="button" id="edGo">Add joint</button>
+          <button class="btn" type="button" id="edNew" hidden>New joint</button>
+        </div>
+        <p class="msg" id="coordMsg" hidden></p>
+        <p class="note" id="edNote"></p>
+      </section>
+
+      <section class="sec">
+        <h2>Count check</h2>
+        <div class="stats">
+          <div class="stat"><span class="l">Joints j</span><span class="v" id="sJ">0</span></div>
+          <div class="stat"><span class="l">Members m</span><span class="v" id="sM">0</span></div>
+          <div class="stat"><span class="l">2j − 3</span><span class="v" id="sR">–</span></div>
+        </div>
+        <span class="pill idle" id="pill">Empty</span>
+        <p class="note">Assumes a pin and a roller support (three reactions). A matching count does not guarantee a stable layout.</p>
+        <div class="warn" id="warn" hidden></div>
+      </section>
+
+      <section class="sec">
+        <h2>Joint coordinates</h2>
+        <div class="tw" id="coords"></div>
+        <p class="note">Click a row to select that joint and edit it above.</p>
+      </section>
+
+      <section class="sec">
+        <h2>Connection matrix</h2>
+        <div class="tw" id="matrix"></div>
+        <p class="note">Entry (i, j) is 1 when a member joins joint i and joint j. The matrix is symmetric.</p>
+      </section>
+
+      <details id="memDet">
+        <summary>Members <span id="memCount">(0)</span></summary>
+        <div class="tw" id="memList"></div>
+        <div class="addrow">
+          <label class="lab" for="mf">From joint</label><input class="ci" type="number" id="mf" step="1" min="1" placeholder="1">
+          <label class="lab" for="mt">to</label><input class="ci" type="number" id="mt" step="1" min="1" placeholder="2">
+          <button class="btn" type="button" id="addMember">Add member</button>
+        </div>
+        <p class="msg" id="memMsg" hidden></p>
+      </details>
+
+      <section class="sec">
+        <h2>Export</h2>
+        <div class="exrow">
+          <label class="field" for="fmt">Format
+            <select id="fmt">
+              <option value="py">Python (NumPy)</option>
+              <option value="m">MATLAB</option>
+              <option value="json">JSON</option>
+              <option value="csv">CSV</option>
+            </select>
+          </label>
+          <button class="btn" type="button" id="copy">Copy</button>
+        </div>
+        <textarea id="exOut" readonly spellcheck="false" aria-label="Export text"></textarea>
+      </section>
+    </aside>
+  </div>
+</div>
+
+<script>
+(function(){
+'use strict';
+var W=880, H=480, EPS=1e-9, LIM=100000, KMIN=2, KMAX=600;
+var KEY='truss-designer-v1';
+var $=function(id){return document.getElementById(id);};
+var svg=$('cv'), gStatic=$('gStatic'), gDyn=$('gDyn');
+
+var view={x:-1,y:-1,k:40};   /* x,y: world coordinates at the left and bottom edge; k: screen units per world unit */
+var nodes=[], members=[], sel=-1;
+var tool='joint', snap=1, units='m', showNums=false;
+var startNode=-1, hoverPt=null, hoverNode=-1, hoverMember=-1, gesture=null;
+var pointers=new Map();
+var hist=[], redoStack=[], saveTimer=null, formKey='';
+
+var EXAMPLE={
+  nodes:[[2,2],[6,2],[10,2],[14,2],[18,2],[6,6],[10,6],[14,6]],
+  members:[[0,1],[1,2],[2,3],[3,4],[5,6],[6,7],[0,5],[4,7],[1,5],[2,6],[3,7],[5,2],[7,2]]
+};
+var HINTS={
+  joint:'Click empty grid to place a joint. Drag a joint to move it. Drag the background to pan, scroll or pinch to zoom.',
+  member:'Click a joint, or empty grid, to start a member, then click the next one. Esc or right-click ends the chain. Drag the background to pan.',
+  del:'Click a joint to remove it with its members, or click a member to remove only that member. Drag the background to pan.'
+};
+
+/* ---------- coordinate helpers ---------- */
+function sx(x){return (x-view.x)*view.k;}
+function sy(y){return H-(y-view.y)*view.k;}
+function wx(vx){return vx/view.k+view.x;}
+function wy(vy){return view.y+(H-vy)/view.k;}
+function fmt(v){return String(Math.round(v*10000)/10000+0);}
+function fmtLen(v){return String(Math.round(v*1000)/1000+0);}
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function norm(a,b){return a<b?[a,b]:[b,a];}
+function hasMember(a,b){
+  var p=norm(a,b);
+  for(var i=0;i<members.length;i++){if(members[i][0]===p[0]&&members[i][1]===p[1])return true;}
+  return false;
+}
+function snapPt(p){
+  var f=function(v){return Math.round(v/snap)*snap+0;};
+  return {x:f(p.x), y:f(p.y)};
+}
+function clientToV(cx,cy){
+  var r=svg.getBoundingClientRect();
+  return {vx:(cx-r.left)*(W/r.width), vy:(cy-r.top)*(H/r.height)};
+}
+function evtToWorld(e){
+  var v=clientToV(e.clientX,e.clientY);
+  return {vx:v.vx, vy:v.vy, x:wx(v.vx), y:wy(v.vy)};
+}
+function ratio(){return svg.getBoundingClientRect().width/W;}
+function nodeAt(x,y,ignore){
+  for(var i=0;i<nodes.length;i++){
+    if(i!==ignore && Math.abs(nodes[i].x-x)<EPS && Math.abs(nodes[i].y-y)<EPS) return i;
+  }
+  return -1;
+}
+function hitNode(p,loose){
+  var R=18/ratio(), best=-1, bd=Infinity;
+  for(var i=0;i<nodes.length;i++){
+    var d=Math.hypot(sx(nodes[i].x)-p.vx, sy(nodes[i].y)-p.vy);
+    if(d<bd){bd=d;best=i;}
+  }
+  if(best>=0 && bd<=R) return best;
+  if(loose){var sp=snapPt(p); return nodeAt(sp.x,sp.y);}
+  return -1;
+}
+function segDist(px,py,ax,ay,bx,by){
+  var dx=bx-ax, dy=by-ay, l2=dx*dx+dy*dy;
+  var t=l2?Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/l2)):0;
+  return Math.hypot(px-(ax+t*dx), py-(ay+t*dy));
+}
+function hitMember(p){
+  var tol=10/ratio(), best=-1, bd=Infinity;
+  for(var k=0;k<members.length;k++){
+    var A=nodes[members[k][0]], B=nodes[members[k][1]];
+    var d=segDist(p.vx,p.vy,sx(A.x),sy(A.y),sx(B.x),sy(B.y));
+    if(d<bd){bd=d;best=k;}
+  }
+  return bd<=tol?best:-1;
+}
+function adj(){
+  var n=nodes.length, A=[];
+  for(var i=0;i<n;i++){A.push(new Array(n).fill(0));}
+  members.forEach(function(m){A[m[0]][m[1]]=1;A[m[1]][m[0]]=1;});
+  return A;
+}
+
+/* ---------- view ---------- */
+function zoomAt(f,vx,vy){
+  var k2=Math.min(KMAX,Math.max(KMIN,view.k*f));
+  var px=wx(vx), py=wy(vy);
+  view.k=k2; view.x=px-vx/k2; view.y=py-(H-vy)/k2;
+}
+function fitView(){
+  if(!nodes.length){view={x:-1,y:-1,k:40};return;}
+  var minx=Infinity,maxx=-Infinity,miny=Infinity,maxy=-Infinity;
+  nodes.forEach(function(n){minx=Math.min(minx,n.x);maxx=Math.max(maxx,n.x);miny=Math.min(miny,n.y);maxy=Math.max(maxy,n.y);});
+  var spanX=Math.max(maxx-minx,1), spanY=Math.max(maxy-miny,1);
+  var k=Math.min((W-140)/spanX,(H-120)/spanY,80);
+  k=Math.min(KMAX,Math.max(KMIN,k));
+  view.k=k;
+  view.x=(minx+maxx)/2-(W/2)/k;
+  view.y=(miny+maxy)/2-(H/2)/k;
+}
+
+/* ---------- history and storage ---------- */
+function snapshot(){
+  return JSON.stringify({n:nodes.map(function(n){return [n.x,n.y];}), m:members});
+}
+function restore(str){
+  var o=JSON.parse(str);
+  nodes=o.n.map(function(a){return {x:a[0],y:a[1]};});
+  members=o.m.map(function(a){return a.slice();});
+  startNode=-1; hoverNode=-1; hoverMember=-1; gesture=null;
+  if(sel>=nodes.length)sel=-1;
+}
+function commit(str){
+  hist.push(str);
+  if(hist.length>200)hist.shift();
+  redoStack=[];
+}
+function pushHist(){commit(snapshot());}
+function undo(){
+  if(!hist.length)return;
+  redoStack.push(snapshot());
+  restore(hist.pop());
+  update();
+}
+function redo(){
+  if(!redoStack.length)return;
+  hist.push(snapshot());
+  restore(redoStack.pop());
+  update();
+}
+function scheduleSave(){
+  clearTimeout(saveTimer);
+  saveTimer=setTimeout(function(){
+    try{
+      localStorage.setItem(KEY,JSON.stringify({
+        nodes:nodes.map(function(n){return [n.x,n.y];}), members:members,
+        snap:snap, units:units, nums:showNums, view:view
+      }));
+    }catch(_){}
+  },250);
+}
+function loadData(o){
+  nodes=o.nodes.map(function(a){return {x:a[0],y:a[1]};});
+  members=o.members.map(function(a){return norm(a[0],a[1]);});
+  startNode=-1; hoverNode=-1; hoverMember=-1; gesture=null; sel=-1;
+}
+function validStored(o){
+  if(!o||!Array.isArray(o.nodes)||!Array.isArray(o.members))return false;
+  var okN=o.nodes.every(function(a){return Array.isArray(a)&&isFinite(a[0])&&isFinite(a[1]);});
+  var n=o.nodes.length;
+  var okM=o.members.every(function(a){return Array.isArray(a)&&a[0]>=0&&a[1]>=0&&a[0]<n&&a[1]<n&&a[0]!==a[1];});
+  return okN&&okM;
+}
+
+/* ---------- drawing ---------- */
+function niceStep(minPx){
+  var seq=[1,2,5];
+  for(var e=-4;e<=7;e++){
+    for(var j=0;j<3;j++){
+      var v=seq[j]*Math.pow(10,e);
+      if(v*view.k>=minPx)return v;
+    }
+  }
+  return 1e7;
+}
+function buildStatic(){
+  var m=niceStep(26), lab=(m*view.k>=40)?1:5, s='', i, v, p;
+  var i0=Math.ceil(wx(0)/m), i1=Math.floor(wx(W)/m);
+  for(i=i0;i<=i1;i++){
+    p=sx(i*m);
+    s+='<line class="'+(i===0?'ax':(i%5===0?'gm':'gn'))+'" x1="'+p+'" y1="0" x2="'+p+'" y2="'+H+'"/>';
+  }
+  var j0=Math.ceil(wy(H)/m), j1=Math.floor(wy(0)/m);
+  for(i=j0;i<=j1;i++){
+    p=sy(i*m);
+    s+='<line class="'+(i===0?'ax':(i%5===0?'gm':'gn'))+'" x1="0" y1="'+p+'" x2="'+W+'" y2="'+p+'"/>';
+  }
+  for(i=i0;i<=i1;i++){
+    if(i%lab!==0)continue;
+    s+='<text class="tick" x="'+sx(i*m)+'" y="'+(H-7)+'" text-anchor="middle">'+fmt(i*m)+'</text>';
+  }
+  for(i=j0;i<=j1;i++){
+    if(i%lab!==0)continue;
+    p=sy(i*m);
+    if(p>H-20||p<30)continue;
+    s+='<text class="tick" x="6" y="'+(p+4)+'" text-anchor="start">'+fmt(i*m)+'</text>';
+  }
+  s+='<text class="axt" x="'+(W-8)+'" y="'+(H-24)+'" text-anchor="end">x ('+esc(units)+')</text>';
+  s+='<text class="axt" x="8" y="16" text-anchor="start">y ('+esc(units)+')</text>';
+  gStatic.innerHTML=s;
+}
+function render(){
+  buildStatic();
+  var s='', k, i;
+  for(k=0;k<members.length;k++){
+    var A=nodes[members[k][0]], B=nodes[members[k][1]];
+    var hot=(tool==='delete'&&hoverMember===k);
+    s+='<line class="mem'+(hot?' hot':'')+'" x1="'+sx(A.x)+'" y1="'+sy(A.y)+'" x2="'+sx(B.x)+'" y2="'+sy(B.y)+'"/>';
+  }
+  if(showNums){
+    for(k=0;k<members.length;k++){
+      var a=nodes[members[k][0]], b=nodes[members[k][1]];
+      s+='<text class="ml" x="'+((sx(a.x)+sx(b.x))/2)+'" y="'+((sy(a.y)+sy(b.y))/2+4)+'" text-anchor="middle">'+(k+1)+'</text>';
+    }
+  }
+  if(tool==='member'&&startNode>=0&&hoverPt&&nodes[startNode]&&!(gesture&&gesture.type==='pan'&&gesture.moved)){
+    var st=nodes[startNode];
+    s+='<line class="prev" x1="'+sx(st.x)+'" y1="'+sy(st.y)+'" x2="'+sx(hoverPt.x)+'" y2="'+sy(hoverPt.y)+'"/>';
+  }
+  var panning=gesture&&gesture.type==='pan'&&gesture.moved;
+  if((tool==='joint'||tool==='member')&&hoverPt&&hoverNode<0&&!panning&&!gesture){
+    var hx=sx(hoverPt.x), hy=sy(hoverPt.y);
+    s+='<circle class="ring" cx="'+hx+'" cy="'+hy+'" r="10"/>';
+    s+='<line class="crs" x1="'+(hx-6)+'" y1="'+hy+'" x2="'+(hx+6)+'" y2="'+hy+'"/><line class="crs" x1="'+hx+'" y1="'+(hy-6)+'" x2="'+hx+'" y2="'+(hy+6)+'"/>';
+  }
+  if(sel>=0&&nodes[sel]){
+    s+='<circle class="selring" cx="'+sx(nodes[sel].x)+'" cy="'+sy(nodes[sel].y)+'" r="15"/>';
+  }
+  for(i=0;i<nodes.length;i++){
+    var n=nodes[i], cls='nd';
+    if(i===startNode)cls+=' start';
+    else if(i===hoverNode&&!panning){
+      if(tool==='delete')cls+=' hot';
+      else cls+=' tgt';
+    }else if(i===sel)cls+=' sel';
+    s+='<circle class="'+cls+'" cx="'+sx(n.x)+'" cy="'+sy(n.y)+'" r="8"/>';
+  }
+  for(i=0;i<nodes.length;i++){
+    s+='<text class="nl" x="'+(sx(nodes[i].x)+12)+'" y="'+(sy(nodes[i].y)-11)+'">'+(i+1)+'</text>';
+  }
+  gDyn.innerHTML=s;
+}
+
+/* ---------- outputs ---------- */
+function crossP(ax,ay,bx,by,px,py){return (bx-ax)*(py-ay)-(by-ay)*(px-ax);}
+function warnings(){
+  var out=[], n=nodes.length, i, j, k;
+  var deg=new Array(n).fill(0);
+  members.forEach(function(m){deg[m[0]]++;deg[m[1]]++;});
+  if(n>1){for(i=0;i<n;i++){if(deg[i]===0)out.push('Joint '+(i+1)+' has no members.');}}
+  for(i=0;i<members.length;i++){
+    for(j=i+1;j<members.length;j++){
+      var p1=nodes[members[i][0]], p2=nodes[members[i][1]], p3=nodes[members[j][0]], p4=nodes[members[j][1]];
+      var d1=crossP(p3.x,p3.y,p4.x,p4.y,p1.x,p1.y), d2=crossP(p3.x,p3.y,p4.x,p4.y,p2.x,p2.y);
+      var d3=crossP(p1.x,p1.y,p2.x,p2.y,p3.x,p3.y), d4=crossP(p1.x,p1.y,p2.x,p2.y,p4.x,p4.y);
+      if(((d1>EPS&&d2<-EPS)||(d1<-EPS&&d2>EPS))&&((d3>EPS&&d4<-EPS)||(d3<-EPS&&d4>EPS))){
+        out.push('Members '+(i+1)+' and '+(j+1)+' cross without a joint.');
+      }
+    }
+  }
+  for(i=0;i<members.length;i++){
+    var A=nodes[members[i][0]], B=nodes[members[i][1]];
+    for(k=0;k<n;k++){
+      if(k===members[i][0]||k===members[i][1])continue;
+      var K=nodes[k];
+      if(Math.abs(crossP(A.x,A.y,B.x,B.y,K.x,K.y))<EPS){
+        var dot=(K.x-A.x)*(B.x-A.x)+(K.y-A.y)*(B.y-A.y), L2=Math.pow(B.x-A.x,2)+Math.pow(B.y-A.y,2);
+        if(dot>EPS&&dot<L2-EPS)out.push('Joint '+(k+1)+' lies on member '+(i+1)+'. Split the member at that joint.');
+      }
+    }
+  }
+  return out;
+}
+function renderStats(){
+  var j=nodes.length, m=members.length, req=2*j-3;
+  $('sJ').textContent=j; $('sM').textContent=m; $('sR').textContent=j>=2?req:'–';
+  var pill=$('pill'), cls='idle', txt;
+  if(j<2){txt=j===0?'Empty. Place joints on the grid.':'Place at least two joints.';}
+  else if(m<req){cls='bad';txt='Unstable. Needs at least '+(req-m)+' more member'+(req-m===1?'':'s')+'.';}
+  else if(m===req){cls='ok';txt='Statically determinate (m = 2j − 3).';}
+  else{cls='info';txt='Statically indeterminate, degree '+(m-req)+'.';}
+  pill.className='pill '+cls; pill.textContent=txt;
+  var w=warnings(), box=$('warn');
+  if(w.length){
+    var shown=w.slice(0,6).map(function(t){return '<li>'+esc(t)+'</li>';}).join('');
+    if(w.length>6)shown+='<li>and '+(w.length-6)+' more.</li>';
+    box.innerHTML='<ul>'+shown+'</ul>'; box.hidden=false;
+  }else{box.hidden=true;box.innerHTML='';}
+}
+function renderCoords(){
+  var el=$('coords');
+  if(!nodes.length){el.innerHTML='<p class="empty">No joints yet. Click the grid to place one.</p>';return;}
+  var h='<table><thead><tr><th class="l">Joint</th><th>x ('+esc(units)+')</th><th>y ('+esc(units)+')</th></tr></thead><tbody>';
+  nodes.forEach(function(n,i){
+    h+='<tr data-i="'+i+'"'+(i===sel?' class="sel"':'')+'><td class="l"><span class="jb">'+(i+1)+'</span></td><td>'+fmt(n.x)+'</td><td>'+fmt(n.y)+'</td></tr>';
+  });
+  el.innerHTML=h+'</tbody></table>';
+}
+function renderMatrix(){
+  var el=$('matrix'), n=nodes.length;
+  if(!n){el.innerHTML='<p class="empty">The matrix appears once you place joints.</p>';return;}
+  var A=adj(), h='<table class="mx"><thead><tr><th class="corner"></th>', i, j;
+  for(j=0;j<n;j++)h+='<th scope="col">'+(j+1)+'</th>';
+  h+='</tr></thead><tbody>';
+  for(i=0;i<n;i++){
+    h+='<tr><th scope="row">'+(i+1)+'</th>';
+    for(j=0;j<n;j++){var v=A[i][j];h+='<td class="'+(v?'one':(i===j?'zero diag':'zero'))+'">'+v+'</td>';}
+    h+='</tr>';
+  }
+  el.innerHTML=h+'</tbody></table>';
+}
+function renderMembers(){
+  $('memCount').textContent='('+members.length+')';
+  var el=$('memList');
+  if(!members.length){el.innerHTML='<p class="empty">No members yet. Use the Member tool to connect two joints.</p>';return;}
+  var h='<table><thead><tr><th class="l">#</th><th class="l">Joints</th><th>Length ('+esc(units)+')</th></tr></thead><tbody>';
+  members.forEach(function(m,k){
+    var a=nodes[m[0]], b=nodes[m[1]];
+    h+='<tr><td class="l">'+(k+1)+'</td><td class="l">'+(m[0]+1)+' – '+(m[1]+1)+'</td><td>'+fmtLen(Math.hypot(b.x-a.x,b.y-a.y))+'</td></tr>';
+  });
+  el.innerHTML=h+'</tbody></table>';
+}
+function exportText(){
+  var f=$('fmt').value, n=nodes.length, A=adj(), u=units||'units', i;
+  if(!n)return f==='py'?'# Place at least one joint to generate output.':(f==='m'?'% Place at least one joint to generate output.':'');
+  var rows=function(fn){return nodes.map(fn);};
+  if(f==='py'){
+    var t='import numpy as np\n\n# Joint coordinates in '+u+'. Row i is joint i (0-based): [x, y]\ncoords = np.array([\n';
+    t+=rows(function(p){return '    ['+fmt(p.x)+', '+fmt(p.y)+'],';}).join('\n')+'\n], dtype=float)\n\n';
+    t+='# Connection matrix. C[i, j] = 1 if joints i and j are joined by a member\nC = np.array([\n';
+    t+=A.map(function(r){return '    ['+r.join(', ')+'],';}).join('\n')+'\n], dtype=int)\n\n';
+    t+='# Members as (joint_i, joint_j), 0-based\nmembers = [\n';
+    t+=members.map(function(m){return '    ('+m[0]+', '+m[1]+'),';}).join('\n');
+    return t+(members.length?'\n':'')+']\n';
+  }
+  if(f==='m'){
+    var s='% Joint coordinates in '+u+'. Row i is joint i: [x y]\ncoords = [\n';
+    s+=rows(function(p){return '    '+fmt(p.x)+' '+fmt(p.y)+';';}).join('\n')+'\n];\n\n';
+    s+='% Connection matrix. C(i,j) = 1 if joints i and j are joined by a member\nC = [\n';
+    s+=A.map(function(r){return '    '+r.join(' ')+';';}).join('\n')+'\n];\n\n';
+    s+='% Members as [joint_i joint_j], 1-based\n';
+    s+=members.length?'members = [\n'+members.map(function(m){return '    '+(m[0]+1)+' '+(m[1]+1)+';';}).join('\n')+'\n];\n':'members = zeros(0,2);\n';
+    return s;
+  }
+  if(f==='json'){
+    return JSON.stringify({
+      units:units,
+      joints:nodes.map(function(p,i){return {id:i+1,x:p.x,y:p.y};}),
+      members:members.map(function(m){return [m[0]+1,m[1]+1];}),
+      connection_matrix:A
+    },null,2);
+  }
+  var c='joint,x,y\n';
+  nodes.forEach(function(p,i){c+=(i+1)+','+fmt(p.x)+','+fmt(p.y)+'\n';});
+  c+='\nconnection matrix\n,';
+  var head=[]; for(i=1;i<=n;i++)head.push(i);
+  c+=head.join(',')+'\n';
+  A.forEach(function(r,i){c+=(i+1)+','+r.join(',')+'\n';});
+  return c;
+}
+function renderExport(){$('exOut').value=exportText();}
+function updateButtons(){
+  $('undo').disabled=!hist.length;
+  $('redo').disabled=!redoStack.length;
+  $('clear').disabled=!nodes.length;
+}
+
+/* joint editor: shows the selected joint; changes apply only on the button */
+function showMsg(id,msg){
+  var el=$(id);
+  if(msg){el.textContent=msg;el.hidden=false;}else{el.textContent='';el.hidden=true;}
+}
+function syncForm(){
+  if(sel>=nodes.length)sel=-1;
+  var key=sel<0?'new':'s'+sel+':'+nodes[sel].x+','+nodes[sel].y;
+  if(key!==formKey){
+    formKey=key;
+    if(sel<0){$('ax').value='';$('ay').value='';}
+    else{$('ax').value=fmt(nodes[sel].x);$('ay').value=fmt(nodes[sel].y);}
+    showMsg('coordMsg','');
+  }
+  if(sel<0){
+    $('edTitle').textContent='Add joint';
+    $('edGo').textContent='Add joint';
+    $('edNew').hidden=true;
+    $('edNote').textContent='Type x and y, then press Add joint. Click a joint on the chart or in the table to edit it.';
+  }else{
+    $('edTitle').textContent='Edit joint '+(sel+1);
+    $('edGo').textContent='Update';
+    $('edNew').hidden=false;
+    $('edNote').textContent='The joint moves only when you press Update. You can also drag it on the chart.';
+  }
+}
+function checkPos(x,y,ignore){
+  if(!isFinite(x)||!isFinite(y))return 'Enter a number for both x and y.';
+  if(Math.abs(x)>LIM||Math.abs(y)>LIM)return 'Coordinates must be within ±'+LIM+'.';
+  if(nodeAt(x,y,ignore)>=0)return 'Another joint is already at that point.';
+  return '';
+}
+
+function update(){
+  renderStats(); renderCoords(); renderMatrix(); renderMembers(); renderExport(); updateButtons(); syncForm(); render();
+  scheduleSave();
+}
+
+/* ---------- tools ---------- */
+function setTool(t){
+  tool=t; startNode=-1; gesture=null; hoverNode=-1; hoverMember=-1;
+  svg.setAttribute('data-tool',t);
+  document.querySelectorAll('[data-tool].btn').forEach(function(b){b.setAttribute('aria-pressed',b.getAttribute('data-tool')===t?'true':'false');});
+  $('hint').textContent=HINTS[t==='delete'?'del':t];
+  svg.style.cursor='';
+  render();
+}
+function deleteNode(i){
+  members=members.filter(function(m){return m[0]!==i&&m[1]!==i;}).map(function(m){return [m[0]>i?m[0]-1:m[0], m[1]>i?m[1]-1:m[1]];});
+  nodes.splice(i,1);
+  if(sel===i)sel=-1; else if(sel>i)sel--;
+  startNode=-1;
+}
+function startDrag(i){
+  gesture={type:'drag',idx:i,moved:false,before:snapshot()};
+  hoverNode=i;
+  svg.style.cursor='grabbing';
+}
+function beginPan(e,sp,action){
+  gesture={type:'pan',cx0:e.clientX,cy0:e.clientY,vx:view.x,vy:view.y,moved:false,action:action,sp:sp};
+}
+function memberClick(i){
+  sel=i;
+  if(startNode<0){startNode=i;}
+  else if(i===startNode){startNode=-1;}
+  else{
+    if(!hasMember(startNode,i)){pushHist();members.push(norm(startNode,i));}
+    startNode=i;
+  }
+  hoverNode=i;
+}
+function pinchState(){
+  var pts=[];
+  pointers.forEach(function(v){pts.push(v);});
+  var a=pts[0], b=pts[1];
+  return {d:Math.hypot(a.x-b.x,a.y-b.y)||1, mx:(a.x+b.x)/2, my:(a.y+b.y)/2};
+}
+function startPinch(){
+  var s=pinchState(), v=clientToV(s.mx,s.my);
+  gesture={type:'pinch',d0:s.d,k0:view.k,ax:wx(v.vx),ay:wy(v.vy)};
+  svg.style.cursor='';
+}
+function doPinch(){
+  var s=pinchState(), v=clientToV(s.mx,s.my);
+  var k=Math.min(KMAX,Math.max(KMIN,gesture.k0*s.d/gesture.d0));
+  view.k=k; view.x=gesture.ax-v.vx/k; view.y=gesture.ay-(H-v.vy)/k;
+  render(); scheduleSave();
+}
+
+svg.addEventListener('pointerdown',function(e){
+  if(e.pointerType==='mouse'&&e.button!==0)return;
+  pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  try{svg.setPointerCapture(e.pointerId);}catch(_){}
+  if(pointers.size===2){startPinch();return;}
+  if(pointers.size>2)return;
+  var p=evtToWorld(e), sp=snapPt(p), i, k;
+  hoverPt=sp;
+  if(tool==='delete'){
+    i=hitNode(p,false);
+    if(i>=0){pushHist();deleteNode(i);hoverNode=-1;update();return;}
+    k=hitMember(p);
+    if(k>=0){pushHist();members.splice(k,1);hoverMember=-1;update();return;}
+    beginPan(e,sp,null);
+    return;
+  }
+  if(tool==='joint'){
+    i=hitNode(p,false);
+    if(i>=0){sel=i;startDrag(i);update();return;}
+    beginPan(e,sp,function(q){
+      var ex=nodeAt(q.x,q.y);
+      if(ex>=0){sel=ex;}
+      else{pushHist();nodes.push({x:q.x,y:q.y});sel=nodes.length-1;}
+    });
+    return;
+  }
+  if(tool==='member'){
+    i=hitNode(p,true);
+    if(i>=0){memberClick(i);update();return;}
+    beginPan(e,sp,function(q){
+      var ex=nodeAt(q.x,q.y);
+      if(ex>=0){memberClick(ex);return;}
+      pushHist();
+      nodes.push({x:q.x,y:q.y});
+      var ni=nodes.length-1;
+      sel=ni;
+      if(startNode>=0)members.push(norm(startNode,ni));
+      startNode=ni;
+      hoverNode=ni;
+    });
+  }
+});
+svg.addEventListener('pointermove',function(e){
+  if(pointers.has(e.pointerId))pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(gesture&&gesture.type==='pinch'){doPinch();return;}
+  var p=evtToWorld(e), sp=snapPt(p);
+  hoverPt=sp;
+  $('readout').textContent='x '+sp.x.toFixed(2)+', y '+sp.y.toFixed(2)+' '+units;
+  if(gesture&&gesture.type==='drag'){
+    var n=nodes[gesture.idx];
+    if((n.x!==sp.x||n.y!==sp.y)&&nodeAt(sp.x,sp.y,gesture.idx)<0){
+      if(!gesture.moved){commit(gesture.before);gesture.moved=true;}
+      n.x=sp.x;n.y=sp.y;
+      update();
+    }
+    return;
+  }
+  if(gesture&&gesture.type==='pan'){
+    var dx=e.clientX-gesture.cx0, dy=e.clientY-gesture.cy0;
+    if(!gesture.moved&&Math.hypot(dx,dy)>5){gesture.moved=true;svg.style.cursor='grabbing';}
+    if(gesture.moved){
+      var f=W/svg.getBoundingClientRect().width;
+      view.x=gesture.vx-dx*f/view.k;
+      view.y=gesture.vy+dy*f/view.k;
+      scheduleSave();
+    }
+    render();
+    return;
+  }
+  hoverNode=hitNode(p,tool==='member');
+  hoverMember=(tool==='delete'&&hoverNode<0)?hitMember(p):-1;
+  render();
+});
+function endPointer(e){
+  pointers.delete(e.pointerId);
+  try{svg.releasePointerCapture(e.pointerId);}catch(_){}
+  var g=gesture;
+  if(!g)return;
+  if(g.type==='pinch'){if(pointers.size<2)gesture=null;return;}
+  gesture=null;
+  svg.style.cursor='';
+  if(g.type==='drag'){update();return;}
+  if(g.type==='pan'){
+    if(!g.moved&&g.action&&e.type==='pointerup'){g.action(g.sp);update();}
+    else render();
+  }
+}
+svg.addEventListener('pointerup',endPointer);
+svg.addEventListener('pointercancel',endPointer);
+svg.addEventListener('pointerleave',function(){
+  if(gesture||pointers.size)return;
+  hoverPt=null;hoverNode=-1;hoverMember=-1;
+  $('readout').textContent='x –, y –';
+  render();
+});
+svg.addEventListener('contextmenu',function(e){
+  e.preventDefault();
+  if(startNode>=0){startNode=-1;render();}
+});
+svg.addEventListener('wheel',function(e){
+  e.preventDefault();
+  var v=clientToV(e.clientX,e.clientY);
+  var f=Math.exp(-e.deltaY*(e.deltaMode===1?0.05:0.0015));
+  f=Math.min(2,Math.max(0.5,f));
+  zoomAt(f,v.vx,v.vy);
+  render();scheduleSave();
+},{passive:false});
+
+/* ---------- controls ---------- */
+document.querySelectorAll('[data-tool].btn').forEach(function(b){
+  b.addEventListener('click',function(){setTool(b.getAttribute('data-tool'));});
+});
+$('undo').addEventListener('click',undo);
+$('redo').addEventListener('click',redo);
+$('example').addEventListener('click',function(){pushHist();loadData(EXAMPLE);fitView();update();});
+$('clear').addEventListener('click',function(){
+  if(!nodes.length)return;
+  pushHist();nodes=[];members=[];startNode=-1;hoverNode=-1;hoverMember=-1;sel=-1;
+  update();
+});
+$('zin').addEventListener('click',function(){zoomAt(1.25,W/2,H/2);render();scheduleSave();});
+$('zout').addEventListener('click',function(){zoomAt(0.8,W/2,H/2);render();scheduleSave();});
+$('fit').addEventListener('click',function(){fitView();render();scheduleSave();});
+$('snap').addEventListener('change',function(){snap=parseFloat(this.value)||1;scheduleSave();});
+$('units').addEventListener('input',function(){
+  units=this.value.trim();
+  renderCoords();renderMembers();renderExport();render();scheduleSave();
+});
+$('nums').addEventListener('change',function(){showNums=this.checked;render();scheduleSave();});
+$('fmt').addEventListener('change',renderExport);
+
+$('coords').addEventListener('click',function(e){
+  var tr=e.target.closest?e.target.closest('tr[data-i]'):null;
+  if(!tr)return;
+  sel=parseInt(tr.getAttribute('data-i'),10);
+  update();
+});
+$('edGo').addEventListener('click',function(){
+  var x=parseFloat($('ax').value), y=parseFloat($('ay').value);
+  var msg=checkPos(x,y,sel<0?-1:sel);
+  if(msg){showMsg('coordMsg',msg);return;}
+  showMsg('coordMsg','');
+  if(sel<0){
+    pushHist();
+    nodes.push({x:x+0,y:y+0});
+    $('ax').value='';$('ay').value='';
+    update();
+    $('ax').focus();
+  }else{
+    if(nodes[sel].x===x&&nodes[sel].y===y)return;
+    pushHist();
+    nodes[sel].x=x+0;nodes[sel].y=y+0;
+    update();
+  }
+});
+$('edNew').addEventListener('click',function(){
+  sel=-1;
+  update();
+  $('ax').focus();
+});
+['ax','ay'].forEach(function(id){
+  $(id).addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();$('edGo').click();}});
+});
+$('addMember').addEventListener('click',function(){
+  var a=parseInt($('mf').value,10), b=parseInt($('mt').value,10), n=nodes.length;
+  var msg='';
+  if(!(a>=1&&a<=n&&b>=1&&b<=n))msg='Enter joint numbers between 1 and '+n+'.';
+  else if(a===b)msg='A member needs two different joints.';
+  else if(hasMember(a-1,b-1))msg='Those joints are already connected.';
+  if(msg){showMsg('memMsg',msg);return;}
+  showMsg('memMsg','');
+  pushHist();
+  members.push(norm(a-1,b-1));
+  $('mf').value='';$('mt').value='';
+  update();
+  $('mf').focus();
+});
+['mf','mt'].forEach(function(id){
+  $(id).addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();$('addMember').click();}});
+});
+
+var flashTimer=null;
+$('copy').addEventListener('click',function(){
+  var btn=this, ta=$('exOut'), txt=ta.value;
+  function flash(msg){
+    btn.textContent=msg;clearTimeout(flashTimer);
+    flashTimer=setTimeout(function(){btn.textContent='Copy';},1600);
+  }
+  function fallback(){
+    ta.focus();ta.select();
+    var ok=false;try{ok=document.execCommand('copy');}catch(_){}
+    flash(ok?'Copied':'Press Ctrl+C');
+  }
+  try{
+    navigator.clipboard.writeText(txt).then(function(){flash('Copied');},fallback);
+  }catch(_){fallback();}
+});
+
+window.addEventListener('keydown',function(e){
+  var t=e.target, tag=t&&t.tagName;
+  if(tag==='INPUT'||tag==='SELECT'||tag==='TEXTAREA')return;
+  var mod=e.ctrlKey||e.metaKey, key=e.key.toLowerCase();
+  if(mod&&key==='z'){e.preventDefault();if(e.shiftKey)redo();else undo();return;}
+  if(mod&&key==='y'){e.preventDefault();redo();return;}
+  if(mod||e.altKey)return;
+  if(key==='j')setTool('joint');
+  else if(key==='m')setTool('member');
+  else if(key==='d')setTool('delete');
+  else if(key==='+'||key==='='){zoomAt(1.25,W/2,H/2);render();scheduleSave();}
+  else if(key==='-'){zoomAt(0.8,W/2,H/2);render();scheduleSave();}
+  else if(key==='f'||key==='0'){fitView();render();scheduleSave();}
+  else if(key==='escape'){
+    if(startNode>=0){startNode=-1;render();}
+    else if(sel>=0){sel=-1;update();}
+  }
+});
+
+/* ---------- start ---------- */
+(function init(){
+  var stored=null;
+  try{var raw=localStorage.getItem(KEY);if(raw)stored=JSON.parse(raw);}catch(_){stored=null;}
+  if(validStored(stored)){
+    loadData(stored);
+    if([0.25,0.5,1,2,5,10].indexOf(stored.snap)>=0)snap=stored.snap;
+    if(typeof stored.units==='string')units=stored.units.slice(0,6);
+    showNums=!!stored.nums;
+    var v=stored.view;
+    if(v&&isFinite(v.x)&&isFinite(v.y)&&isFinite(v.k)&&v.k>=KMIN&&v.k<=KMAX)view={x:v.x,y:v.y,k:v.k};
+  }else{
+    loadData(EXAMPLE);
+  }
+  $('snap').value=String(snap);
+  $('units').value=units;
+  $('nums').checked=showNums;
+  setTool('joint');
+  update();
+})();
+})();
+</script>
+</body>
+</html>
